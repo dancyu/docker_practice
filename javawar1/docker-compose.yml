@@ -1,0 +1,11 @@
+version: '3.7'
+services:
+  web:
+    image: javawar1_image
+    volumes:
+      - javawar1_vol:/usr/local/tomcat/logs
+    ports:
+      - 80:8080
+
+volumes:
+  javawar1_vol:
