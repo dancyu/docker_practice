@@ -1,6 +1,7 @@
 # 包裝 Java War file with Tomcat to Docker Image
 ###### tags: `Tag(docker)` `Tag(Tomcat)`
 
+這是拿 java war檔由淺入深的實作Docker 練習筆記
 
 ### Agenda
 包裝Docker/啟動Container的方式由簡入深:
@@ -8,6 +9,9 @@
 - 加入Volume
 - 用docker volume 指定volume
 - 使用docker-compose啟動container
+- 指定container name
+- docker-compose 啟動container放到背景執行
+- container指定時區
 ---
 ### 陽春版
 2. a simple war, just show HelloWorld string on page
@@ -66,12 +70,12 @@ docker run -p 80:8080 javawar1_image
 ### 加入Volume
 - 上述啟動服務後，透過 Docker Dashboard 可直接點選該container CLI
 ![](https://i.imgur.com/gUkO5sP.png)
-- 預設開啟路徑就是tomcat工作路徑
+- 它會帶著docker exec -it {完整container_id} /bin/sh 進入container,就可以對container下linux指令。預設路徑就是tomcat工作路徑
 ![](https://i.imgur.com/Mn8Gw3R.png)
 container內tomcat 在/usr/local/tomcat/logs 下產生log
 
 - 緣由:
-    - 若每次都起新的container，這些log就消失
+    - 若執行docker run,每次都起新的container，這些log就消失
     - 要到container內找log不方便，可以指定本機目錄取代container內的/usr/local/tomcat/logs。 (ps.查閱log應可結合其他監控軟體,後續再延伸。)
     - 應用程式除了Log之外，如資料庫還是需要有固定存取的磁碟空間 
 
@@ -92,7 +96,7 @@ docker run -p 80:8080 -v /Users/dancyu/codes/docker_practice_private/volume/java
 延續前文，透過docker volume 管理volume
 - 指令格式
 ```docker volume create [OPTIONS] [VOLUME]```
-- 
+- 指令
 ```buildoutcfg
 % docker volume create javawar1_vol
 javawar1_vol
@@ -116,7 +120,8 @@ javawar1_vol
 
 
 ```
-docker volume指定本機目錄[嘗試紀錄](https://hackmd.io/@CqRN13XlTXynDVuQ6clCkw/S1jOFKeuY)（尚未找到指定目錄的方式）
+原目的是以docker volume 取代 上一小節的做法，但始終不成功[嘗試紀錄](https://hackmd.io/@CqRN13XlTXynDVuQ6clCkw/S1jOFKeuY)
+目前練習結果只能由docker volume控制寫到本機位置，無法指定寫到哪裡，後續待深究。
 
 - docker run執行
 ```buildoutcfg
@@ -174,12 +179,88 @@ group 會以執行位置的當前目錄來命名，
 1. volume 可以同時給多個container同時使用
     * 注意在這個練習拿tomcat當範例很不適合，正式環境不會把多個tomcat log導在一起, 本範例的實作目的是為了實驗container重啟時可以使用同一塊空間繼續寫入。
 3. docker run 與docker-compose 啟動的container 指定volume時要注意目錄名 (但是否為我的docker-compose指定的不正確,未正確設定volumes map內容,待考證)
-4. 用docker volume產生在/var/lib/docker/volumes/下的volume檔案只有在container啟動起來後才能使用cli去調閱內容,
+4. 用docker volume產生在/var/lib/docker/volumes/下的volume檔案只有在container啟動起來後才能使用cli去調閱內容
 
 ---
+### 指定container name
+在docker-compose.yml加上 container_name
+```
+version: '3.7'
+services:
+  web:
+    container_name: javawar1_app
+    image: javawar1_image
+    volumes:
+      - javawar1_vol:/usr/local/tomcat/logs
+    ports:
+      - 80:8080
+volumes:
+  javawar1_vol:
+```
+指定container name之後，如下
+![](https://i.imgur.com/ZxpqBAD.png)
+
+docker exec -it 也可指定container_name,不用去找container id
+![](https://i.imgur.com/P4sHdyX.png)
+
+
+
+### 啟動container放到背景執行
+執行docker-cpmpose up 加上-d 背景執行，就不會每次都跑出log
+```
+docker-compose up -d
+```
+
+---
+### container指定時區
+tomcat的log內容都是utc時區, 非CST
+在docker-compose.yml加上
+```buildoutcfg
+version: '3.7'
+services:
+  web:
+    image: javawar1_image
+    volumes:
+      - javawar1_vol:/usr/local/tomcat/logs
+    ports:
+      - 80:8080
+    environment:
+      - TZ=Asia/Taipei
+volumes:
+  javawar1_vol:{javawar1_vol}
+```
+更改後，再用docker-compose up執行，發現log寫出的時間已是台北時區
+![](https://i.imgur.com/98NrgBw.png)
+但是時間還是UTC，google其他同步container與本機時間的方式，但沒有效果。
+-v /etc/localtime:/etc/localtime:ro
+```buildoutcfg
+version: '3.7'
+services:
+  web:
+    image: javawar1_image
+    volumes:
+      - javawar1_vol:/usr/local/tomcat/logs
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - 80:8080
+    environment:
+      - TZ=Asia/Taipei
+volumes:
+  javawar1_vol:{javawar1_vol}
+```
+思考：監控軟體抓取log的時間可以讀取utc並顯示為 cst, 或許可不去改container時間。目前還在嘗試單一docker的階段，設定TZ=Asia/Taipei已夠debug用。
+
 ### 待研究
 1. docker run 或docker-compose up執行起container就直接看到tomcat log, 是否都應該改為背景執行？
-2. 如何指定啟動都使用同一個container?
-3. docker-compose.yml volumes 的設定方式待確認 {}的設定方法
-4. war file升版的流程?
+    > docker-compose up -d 
+    > 指定-d 就會是背景執行了 
+3. 如何指定啟動都使用同一個container? 
+    > 這問法有誤區，問題源自每次用docker run就產生一個新的container,但需要以使用情境來說明
+    > 若以在本機使用docker db instead of install 並指定volume, 則可透過docker dashboard 起停 container
+    > 用docker-compose up 若docker-compose.yml有更新,docker會destroy舊的container,再起一個新的.看起來像是原來的那一個 但container_id已是不同. 指定volume則會讓寫出磁碟有延續性。 
+4. docker-compose.yml volumes 的設定方式待確認 {}的設定方法
+5. war file升版的處理流程
+6. tomcat upgrade
+7. application container 應該是stateless的使用,隨時可以重啟AAA橫向擴充.  需要思考application的異常監控機制
+8. Dockerfile內寫了cmd, docker-compose.yml也可以下EXEC 這兩個在實務上要怎麼搭配使用，需要再深入了解兩者間的差異。
 
